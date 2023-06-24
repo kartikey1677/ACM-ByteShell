@@ -1,6 +1,6 @@
 # ACM-ByteShell
 FUNCTIONS IMPLEMENTED:
-1. alias
+1.  alias
 2. unalias
 3. echo
 4. printf
