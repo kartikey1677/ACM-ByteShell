@@ -1,370 +1,268 @@
+ //1. Implementation of ALIAS buitin in shell.
 
 
-#include <sys/wait.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include<stdbool.h>
+
+typedef struct Alias {
+    char* name;
+    char* command;
+    struct Alias* next;
+} Alias;
+
+Alias* aliases = NULL;
+
+Alias* create_alias(char* name, char* command) {
+    Alias* new_alias = malloc(sizeof(Alias));
+    if (new_alias == NULL) {
+        fprintf(stderr, "Memory allocation error\n");
+        exit(1);
+    }
+
+    new_alias->name = strdup(name);
+    if (new_alias->name == NULL) {
+        fprintf(stderr, "Memory allocation error\n");
+        exit(1);
+    }
+
+    new_alias->command = strdup(command);
+    if (new_alias->command == NULL) {
+        fprintf(stderr, "Memory allocation error\n");
+        exit(1);
+    }
+
+    new_alias->next = NULL;
+
+    return new_alias;
+}
+
+void add_alias(char* name, char* command) {
+    Alias* new_alias = create_alias(name, command);
+    new_alias->next = aliases;
+    aliases = new_alias;
+}
+
+void remove_alias(char* name) {
+    Alias* current = aliases;
+    Alias* prev = NULL;
+
+    while (current != NULL) {
+        if (strcmp(current->name, name) == 0) {
+            if (prev == NULL) {
+                aliases = current->next;
+            } else {
+                prev->next = current->next;
+            }
+
+            free(current->name);
+            free(current->command);
+            free(current);
+            return;
+        }
+
+        prev = current;
+        current = current->next;
+    }
+
+    fprintf(stderr, "Alias '%s' not found\n", name);
+}
+
+char* expand_alias(char* name) {
+    Alias* current = aliases;
+
+    while (current != NULL) {
+        if (strcmp(current->name, name) == 0) {
+            return current->command;
+        }
+        current = current->next;
+    }
+
+    return NULL;
+}
+
+void free_aliases() {
+    Alias* current = aliases;
+    Alias* next;
+
+    while (current != NULL) {
+        next = current->next;
+        free(current->name);
+        free(current->command);
+        free(current);
+        current = next;
+    }
+}
+
+int main() {
+    add_alias("l", "ls");
+    add_alias("ll", "ls -l");
+    add_alias("c", "clear");
+    
+    bool valid=true;
+
+    char command[256];
+
+    while (1) {
+        printf("Enter a command: ");
+        fgets(command, sizeof(command), stdin);
+
+        // Remove trailing newline character
+        command[strcspn(command, "\n")] = '\0';
+
+        // Check if the command matches an alias
+        char* expanded_command = expand_alias(command);
+        if (expanded_command != NULL) {
+            printf("Expanded command: %s\n", expanded_command);
+            strcpy(command, expanded_command);
+        }
+        else{
+            valid=false;
+            printf("Invalid command \n");
+        }
+
+        if (strcmp(command, "alias") == 0) {
+            char alias_name[256];
+            char alias_command[256];
+
+            printf("Enter alias name: ");
+            fgets(alias_name, sizeof(alias_name), stdin);
+            alias_name[strcspn(alias_name, "\n")] = '\0';
+
+            printf("Enter alias command: ");
+            fgets(alias_command, sizeof(alias_command), stdin);
+            alias_command[strcspn(alias_command, "\n")] = '\0';
+
+            add_alias(alias_name, alias_command);
+        } else if (strcmp(command, "unalias") == 0) {
+            char alias_name[256];
+
+            printf("Enter alias name to remove: ");
+            fgets(alias_name, sizeof(alias_name), stdin);
+            alias_name[strcspn(alias_name, "\n")] = '\0';
+
+            remove_alias(alias_name);
+        } else if (strcmp(command, "exit") == 0) {
+            break;
+        } 
+        if(valid) {
+            printf("Executing command: %s\n", command);
+            // Execute the command
+            // ...
+        }
+    }
+
+    free_aliases();
+
+    return 0;
+}
+
+
+//2. Implementation of UNALIAS buitin in shell
+
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define MAX_COMMAND_SIZE 1024
-#define MAX_ALIAS_SIZE 100
+#define MAX_ALIAS_LENGTH 100
+#define MAX_COMMAND_LENGTH 100
+#define MAX_ALIASES 10
 
-struct Alias {
-  char alias[MAX_COMMAND_SIZE];
-  char command[MAX_COMMAND_SIZE];
-};
+typedef struct {
+    char alias[MAX_ALIAS_LENGTH];
+    char command[MAX_COMMAND_LENGTH];
+} Alias;
 
-struct Alias aliases[MAX_ALIAS_SIZE];
-int alias_count = 0;
+Alias aliases[MAX_ALIASES];
+int numAliases = 0;
 
-/*
-  Function Declarations for builtin shell commands:
- */
-int lsh_cd(char **args);
-int lsh_help(char **args);
-int lsh_exit(char **args);
-int lsh_alias(char **args);
-void show_aliases();
-_Bool add_alias(char *alias, char *command);
-char *expand_alias(char *command);
-int lsh_echo(char **args);
-
-/*
-  List of builtin commands, followed by their corresponding functions.
- */
-char *builtin_str[] = {
-  "cd",
-  "help",
-  "exit",
-  "alias",
-  "echo"
-};
-
-int (*builtin_func[]) (char **) = {
-  &lsh_cd,
-  &lsh_help,
-  &lsh_exit,
-  &lsh_alias,
-  &lsh_echo
-};
-
-int lsh_echo(char **args)
-{
-  int i = 1;
-  while (args[i] != NULL) {
-    printf("%s ", args[i]);
-    i++;
-  }
-  printf("\n");
-  return 1;
-}
-int lsh_num_builtins() {
-  return sizeof(builtin_str) / sizeof(char *);
-}
-
-/*
-  Builtin function implementations.
-*/
-
-/**
-   @brief Builtin command: change directory.
-   @param args List of args.  args[0] is "cd".  args[1] is the directory.
-   @return Always returns 1, to continue executing.
- */
-int lsh_cd(char **args)
-{
-  if (args[1] == NULL) {
-    fprintf(stderr, "lsh: expected argument to \"cd\"\n");
-  } else {
-    if (chdir(args[1]) != 0) {
-      perror("lsh");
-    }
-  }
-  return 1;
-}
-
-/**
-   @brief Builtin command: print help.
-   @param args List of args.  Not examined.
-   @return Always returns 1, to continue executing.
- */
-int lsh_help(char **args)
-{
-  int i;
-  printf("Kartikey's LSH\n");
-  printf("Type program names and arguments, and hit enter.\n");
-  printf("The following are built in:\n");
-
-  for (i = 0; i < lsh_num_builtins(); i++) {
-    printf("  %s\n", builtin_str[i]);
-  }
-
-  printf("Use the man command for information on other programs.\n");
-  return 1;
-}
-
-/**
-   @brief Builtin command: exit.
-   @param args List of args.  Not examined.
-   @return Always returns 0, to terminate execution.
- */
-int lsh_exit(char **args)
-{
-  return 0;
-}
-
-/**
-   @brief Builtin command: alias.
-   @param args List of args.  args[0] is "alias".  args[1] is the alias name, args[2] is the command.
-   @return Always returns 1, to continue executing.
- */
-int lsh_alias(char **args)
-{
-  if (args[1] == NULL || args[2] == NULL) {
-    fprintf(stderr, "lsh: expected arguments to \"alias\"\n");
-  } else {
-    if (add_alias(args[1], args[2])) {
-      printf("Alias added: %s -> %s\n", args[1], args[2]);
-    } else {
-      fprintf(stderr, "lsh: failed to add alias\n");
-    }
-  }
-  return 1;
-}
-
-/**
-   @brief Add an alias to the list of aliases.
-   @param alias The alias name.
-   @param command The command associated with the alias.
-   @return 1 if the alias is added successfully, 0 otherwise.
- */
-_Bool add_alias(char *alias, char *command)
-{
-  if (alias_count < MAX_ALIAS_SIZE) {
-    strncpy(aliases[alias_count].alias, alias, MAX_COMMAND_SIZE);
-    strncpy(aliases[alias_count].command, command, MAX_COMMAND_SIZE);
-    alias_count++;
-    return 1;
-  }
-  return 0;
-}
-
-/**
-   @brief Expand aliases in a command.
-   @param command The command to expand aliases in.
-   @return The expanded command.
- */
-char *expand_alias(char *command)
-{
-  char *expanded = malloc(sizeof(char) * MAX_COMMAND_SIZE);
-  if (expanded == NULL) {
-    fprintf(stderr, "lsh: allocation error\n");
-    exit(EXIT_FAILURE);
-  }
-  strncpy(expanded, command, MAX_COMMAND_SIZE);
-
-  for (int i = 0; i < alias_count; i++) {
-    if (strcmp(aliases[i].alias, command) == 0) {
-      strncpy(expanded, aliases[i].command, MAX_COMMAND_SIZE);
-      break;
-    }
-  }
-
-  return expanded;
-}
-
-/**
-   @brief Builtin command: show aliases.
-   @param args List of args.  Not examined.
-   @return Always returns 1, to continue executing.
- */
-void show_aliases()
-{
-  if (alias_count == 0) {
-    printf("No aliases defined.\n");
-  } else {
-    printf("Aliases:\n");
-    for (int i = 0; i < alias_count; i++) {
-      printf("  %s -> %s\n", aliases[i].alias, aliases[i].command);
-    }
-  }
-}
-
-/**
-  @brief Launch a program and wait for it to terminate.
-  @param args Null terminated list of arguments (including program).
-  @return Always returns 1, to continue execution.
- */
-int lsh_launch(char **args)
-{
-  pid_t pid;
-  int status;
-
-  pid = fork();
-  if (pid == 0) {
-    // Child process
-    if (execvp(args[0], args) == -1) {
-      perror("lsh");
-    }
-    exit(EXIT_FAILURE);
-  } else if (pid < 0) {
-    // Error forking
-    perror("lsh");
-  } else {
-    // Parent process
-    do {
-      waitpid(pid, &status, WUNTRACED);
-    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-  }
-
-  return 1;
-}
-
-/**
-   @brief Execute shell built-in or launch program.
-   @param args Null terminated list of arguments.
-   @return 1 if the shell should continue running, 0 if it should terminate.
- */
-int lsh_execute(char **args)
-{
-  int i;
-
-  if (args[0] == NULL) {
-    // An empty command was entered.
-    return 1;
-  }
-
-  // Check if the command is an alias
-  char *expanded_command = expand_alias(args[0]);
-
-  for (i = 0; i < lsh_num_builtins(); i++) {
-    if (strcmp(expanded_command, builtin_str[i]) == 0) {
-      free(expanded_command);
-      return (*builtin_func[i])(args);
-    }
-  }
-
-  if (access(args[0], X_OK) == -1) {
-    fprintf(stderr, "shell: unrecognized command: %s\n", args[0]);
-    return 1;
-  }
-
-  free(expanded_command);
-
-  return lsh_launch(args);
-}
-
-/**
-   @brief Read a line of input from stdin.
-   @return The line from stdin.
- */
-char *lsh_read_line(void)
-{
-  int bufsize = MAX_COMMAND_SIZE;
-  int position = 0;
-  char *buffer = malloc(sizeof(char) * bufsize);
-  int c;
-
-  if (!buffer) {
-    fprintf(stderr, "lsh: allocation error\n");
-    exit(EXIT_FAILURE);
-  }
-
-  while (1) {
-    // Read a character
-    c = getchar();
-
-    if (c == EOF || c == '\n') {
-      buffer[position] = '\0';
-      return buffer;
-    } else {
-      buffer[position] = c;
-    }
-    position++;
-
-    // Reallocate if buffer size is exceeded
-    if (position >= bufsize) {
-      bufsize += MAX_COMMAND_SIZE;
-      buffer = realloc(buffer, bufsize);
-      if (!buffer) {
-        fprintf(stderr, "lsh: allocation error\n");
-        exit(EXIT_FAILURE);
-      }
-    }
-  }
-}
-
-/**
-   @brief Split a line into tokens (very naively).
-   @param line The line.
-   @return Null-terminated array of tokens.
- */
-char **lsh_split_line(char *line)
-{
-  int bufsize = MAX_COMMAND_SIZE, position = 0;
-  char **tokens = malloc(bufsize * sizeof(char *));
-  char *token;
-
-  if (!tokens) {
-    fprintf(stderr, "lsh: allocation error\n");
-    exit(EXIT_FAILURE);
-  }
-
-  token = strtok(line, " \t\r\n\a");
-  while (token != NULL) {
-    tokens[position] = token;
-    position++;
-
-    if (position >= bufsize) {
-      bufsize += MAX_COMMAND_SIZE;
-      tokens = realloc(tokens, bufsize * sizeof(char *));
-      if (!tokens) {
-        fprintf(stderr, "lsh: allocation error\n");
-        exit(EXIT_FAILURE);
-      }
+void addAlias(const char *alias, const char *command) {
+    if (numAliases >= MAX_ALIASES) {
+        printf("Maximum number of aliases exceeded.\n");
+        return;
     }
 
-    token = strtok(NULL, " \t\r\n\a");
-  }
-  tokens[position] = NULL;
-  return tokens;
+    strcpy(aliases[numAliases].alias, alias);
+    strcpy(aliases[numAliases].command, command);
+    numAliases++;
 }
 
-/**
-   @brief Loop getting input and executing it.
- */
-void lsh_loop(void)
-{
-  char *line;
-  char **args;
-  int status;
-
-  do {
-    printf("> ");
-    line = lsh_read_line();
-    args = lsh_split_line(line);
-    status = lsh_execute(args);
-
-    free(line);
-    free(args);
-  } while (status);
+void removeAlias(const char *alias) {
+    for (int i = 0; i < numAliases; i++) {
+        if (strcmp(aliases[i].alias, alias) == 0) {
+            for (int j = i; j < numAliases - 1; j++) {
+                strcpy(aliases[j].alias, aliases[j + 1].alias);
+                strcpy(aliases[j].command, aliases[j + 1].command);
+            }
+            numAliases--;
+            printf("Removed alias: %s\n", alias);
+            return;
+        }
+    }
+    printf("Alias not found: %s\n", alias);
 }
 
-/**
-   @brief Main entry point.
-   @param argc Argument count.
-   @param argv Argument vector.
-   @return status code
- */
-int main(int argc, char **argv)
-{
-  // Load config files, if any.
-
-  // Run command loop.
-  lsh_loop();
-
-  // Perform any shutdown/cleanup.
-
-  return EXIT_SUCCESS;
+void printAliases() {
+    printf("Defined aliases:\n");
+    for (int i = 0; i < numAliases; i++) {
+        printf("%s=%s\n", aliases[i].alias, aliases[i].command);
+    }
 }
+
+int main() {
+    while (1) {
+        printf("Enter command (unalias, print, exit): ");
+        char input[MAX_COMMAND_LENGTH];
+        scanf("%s", input);
+
+        if (strcmp(input, "unalias") == 0) {
+            printf("Enter alias to remove: ");
+            char alias[MAX_ALIAS_LENGTH];
+            scanf("%s", alias);
+            removeAlias(alias);
+        } else if (strcmp(input, "print") == 0) {
+            printAliases();
+        } else if (strcmp(input, "exit") == 0) {
+            break;
+        } else {
+            printf("Invalid command\n");
+        }
+    }
+
+    return 0;
+}
+
+//3. Implementing echo builtin
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void shell_echo(const char* message) {
+    fputs(message, stdout);
+    putchar('\n');
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Error: No message provided\n");
+        return 1;
+    }
+
+    // Concatenate command-line arguments
+    char* message = argv[1];
+    for (int i = 2; i < argc; i++) {
+        message = realloc(message, strlen(message) + strlen(argv[i]) + 2);
+        strcat(message, " ");
+        strcat(message, argv[i]);
+    }
+
+    shell_echo(message);
+    free(message);
+
+    return 0;
+}
+
+
+// 4.
