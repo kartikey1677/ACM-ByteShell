@@ -265,4 +265,349 @@ int main(int argc, char* argv[]) {
 }
 
 
-// 4.
+// 4. printf function basic implementation
+
+#include <stdio.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+
+void shell_printf(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    int i = 0;
+    char ch;
+    char buffer[256];
+    int buffer_index = 0;
+
+    while ((ch = format[i++]) != '\0') {
+        if (ch == '%') {
+            ch = format[i++];
+            buffer_index = 0;
+
+            switch (ch) {
+                case 'c':
+                    putchar(va_arg(args, int));
+                    break;
+                case 'd':
+                    snprintf(buffer, sizeof(buffer), "%d", va_arg(args, int));
+                    fputs(buffer, stdout);
+                    break;
+                case 's':
+                    fputs(va_arg(args, char*), stdout);
+                    break;
+                case 'f':
+                    snprintf(buffer, sizeof(buffer), "%f", va_arg(args, double));
+                    fputs(buffer, stdout);
+                    break;
+                default:
+                    putchar(ch);
+                    break;
+            }
+        } 
+        
+        else {
+            putchar(ch);
+        }
+    }
+
+    va_end(args);
+}
+
+int main() {
+    shell_printf("Hello, %s!\n", "User");
+    shell_printf("The answer is %d\n", 42);
+    shell_printf("The value of PI is %f\n", 3.14159);
+
+    return 0;
+}
+
+//5. Implementation of cd 
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+
+void change_directory(const char* directory) {
+    if (chdir(directory) != 0) {
+        fprintf(stderr, "Error: Failed to change directory to %s\n", directory);
+    }
+}
+
+void update_pwd_environment_variable() {
+    char cwd[256];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        setenv("PWD", cwd, 1);
+    } else {
+        fprintf(stderr, "Error: Failed to update PWD environment variable\n");
+    }
+}
+
+int main() {
+    char directory[256];
+
+    while (1) {
+        printf("Enter a directory you want to work in : ");
+        fgets(directory, sizeof(directory), stdin);
+
+        // Remove trailing newline character
+        directory[strcspn(directory, "\n")] = '\0';
+
+        if (strcmp(directory, "cd") == 0) {
+            // No directory specified, go to the user's home directory
+            const char* home_dir = getenv("HOME");
+            if (home_dir == NULL) {
+                fprintf(stderr, "Error: Home directory not found\n");
+                continue;
+            }
+
+            change_directory(home_dir);
+            update_pwd_environment_variable();
+        } else if (strcmp(directory, "exit") == 0) {
+            break;
+        } else {
+            change_directory(directory);
+            update_pwd_environment_variable();
+        }
+    }
+
+    return 0;
+}
+
+
+//6. Implementation of help
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_COMMAND_LENGTH 100
+#define MAX_COMMANDS 10
+
+typedef struct {
+    char name[MAX_COMMAND_LENGTH];
+    int enabled;
+} Command;
+
+Command commands[MAX_COMMANDS];
+int numCommands = 0;
+
+void enableCommand(const char *commandName) {
+    for (int i = 0; i < numCommands; i++) {
+        if (strcmp(commands[i].name, commandName) == 0) {
+            commands[i].enabled = 1;
+            printf("Enabled command: %s\n", commandName);
+            return;
+        }
+    }
+    printf("Command not found: %s\n", commandName);
+}
+
+void disableCommand(const char *commandName) {
+    for (int i = 0; i < numCommands; i++) {
+        if (strcmp(commands[i].name, commandName) == 0) {
+            commands[i].enabled = 0;
+            printf("Disabled command: %s\n", commandName);
+            return;
+        }
+    }
+    printf("Command not found: %s\n", commandName);
+}
+
+void executeCommand(const char *commandName) {
+    for (int i = 0; i < numCommands; i++) {
+        if (strcmp(commands[i].name, commandName) == 0) {
+            if (commands[i].enabled) {
+                printf("Executing command: %s\n", commandName);
+                return;
+            } else {
+                printf("Command is disabled: %s\n", commandName);
+                return;
+            }
+        }
+    }
+    printf("Command not found: %s\n", commandName);
+}
+
+void printCommands() {
+    printf("Enabled commands:\n");
+    for (int i = 0; i < numCommands; i++) {
+        if (commands[i].enabled) {
+            printf("%s\n", commands[i].name);
+        }
+    }
+    printf("Disabled commands:\n");
+    for (int i = 0; i < numCommands; i++) {
+        if (!commands[i].enabled) {
+            printf("%s\n", commands[i].name);
+        }
+    }
+}
+
+int main() {
+    while (1) {
+        printf("Enter command (enable, disable, execute, print, exit): ");
+        char input[MAX_COMMAND_LENGTH];
+        scanf("%s", input);
+
+        if (strcmp(input, "enable") == 0) {
+            printf("Enter command to enable: ");
+            char command[MAX_COMMAND_LENGTH];
+            scanf("%s", command);
+            enableCommand(command);
+        } else if (strcmp(input, "disable") == 0) {
+            printf("Enter command to disable: ");
+            char command[MAX_COMMAND_LENGTH];
+            scanf("%s", command);
+            disableCommand(command);
+        } else if (strcmp(input, "execute") == 0) {
+            printf("Enter command to execute: ");
+            char command[MAX_COMMAND_LENGTH];
+            scanf("%s", command);
+            executeCommand(command);
+        } else if (strcmp(input, "print") == 0) {
+            printCommands();
+        } else if (strcmp(input, "exit") == 0) {
+            break;
+        } else {
+            printf("Invalid command\n");
+        }
+    }
+
+    return 0;
+}
+
+//7. Implementation of exit 
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_COMMAND_LENGTH 100
+
+int main() {
+    while (1) {
+        printf("Enter command (exit to terminate): ");
+        char input[MAX_COMMAND_LENGTH];
+        scanf("%s", input);
+
+        if (strcmp(input, "exit") == 0) {
+            printf("Exiting the shell...\n");
+            break;
+        } 
+        else {
+            printf("Invalid command\n");
+        }
+    }
+
+    return 0;
+}
+
+
+
+//8.Implementation of enable
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_COMMAND_LENGTH 100
+#define MAX_COMMANDS 10
+
+typedef struct {
+    char name[MAX_COMMAND_LENGTH];
+    int enabled;
+} Command;
+
+Command commands[MAX_COMMANDS];
+int numCommands = 0;
+
+void enableCommand(const char *commandName) {
+    for (int i = 0; i < numCommands; i++) {
+        if (strcmp(commands[i].name, commandName) == 0) {
+            commands[i].enabled = 1;
+            printf("Enabled command: %s\n", commandName);
+            return;
+        }
+    }
+    printf("Command not found: %s\n", commandName);
+}
+
+void disableCommand(const char *commandName) {
+    for (int i = 0; i < numCommands; i++) {
+        if (strcmp(commands[i].name, commandName) == 0) {
+            commands[i].enabled = 0;
+            printf("Disabled command: %s\n", commandName);
+            return;
+        }
+    }
+    printf("Command not found: %s\n", commandName);
+}
+
+void executeCommand(const char *commandName) {
+    for (int i = 0; i < numCommands; i++) {
+        if (strcmp(commands[i].name, commandName) == 0) {
+            if (commands[i].enabled) {
+                printf("Executing command: %s\n", commandName);
+                return;
+            } else {
+                printf("Command is disabled: %s\n", commandName);
+                return;
+            }
+        }
+    }
+    printf("Command not found: %s\n", commandName);
+}
+
+void printCommands() {
+    printf("Enabled commands:\n");
+    for (int i = 0; i < numCommands; i++) {
+        if (commands[i].enabled) {
+            printf("%s\n", commands[i].name);
+        }
+    }
+    printf("Disabled commands:\n");
+    for (int i = 0; i < numCommands; i++) {
+        if (!commands[i].enabled) {
+            printf("%s\n", commands[i].name);
+        }
+    }
+}
+
+int main() {
+    while (1) {
+        printf("Enter command (enable, disable, execute, print, exit): ");
+        char input[MAX_COMMAND_LENGTH];
+        scanf("%s", input);
+
+        if (strcmp(input, "enable") == 0) {
+            printf("Enter command to enable: ");
+            char command[MAX_COMMAND_LENGTH];
+            scanf("%s", command);
+            enableCommand(command);
+        } else if (strcmp(input, "disable") == 0) {
+            printf("Enter command to disable: ");
+            char command[MAX_COMMAND_LENGTH];
+            scanf("%s", command);
+            disableCommand(command);
+        } else if (strcmp(input, "execute") == 0) {
+            printf("Enter command to execute: ");
+            char command[MAX_COMMAND_LENGTH];
+            scanf("%s", command);
+            executeCommand(command);
+        } else if (strcmp(input, "print") == 0) {
+            printCommands();
+        } else if (strcmp(input, "exit") == 0) {
+            break;
+        } else {
+            printf("Invalid command\n");
+        }
+    }
+
+    return 0;
+}
+
+
+
